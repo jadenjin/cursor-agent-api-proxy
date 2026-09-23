@@ -5,42 +5,6 @@
 
 import type { OpenAIChatMessage, OpenAIChatRequest, OpenAIContentPart } from "../types/openai.js";
 
-const KNOWN_CURSOR_MODELS = new Set([
-  "auto",
-  "composer-1.5",
-  "composer-1",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-low",
-  "gpt-5.3-codex-high",
-  "gpt-5.3-codex-xhigh",
-  "gpt-5.3-codex-fast",
-  "gpt-5.3-codex-low-fast",
-  "gpt-5.3-codex-high-fast",
-  "gpt-5.3-codex-xhigh-fast",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.2-codex-high",
-  "gpt-5.2-codex-low",
-  "gpt-5.2-codex-xhigh",
-  "gpt-5.2-codex-fast",
-  "gpt-5.2-codex-high-fast",
-  "gpt-5.2-codex-low-fast",
-  "gpt-5.2-codex-xhigh-fast",
-  "gpt-5.1-codex-max",
-  "gpt-5.1-codex-max-high",
-  "opus-4.6-thinking",
-  "sonnet-4.5-thinking",
-  "gpt-5.2-high",
-  "opus-4.6",
-  "opus-4.5",
-  "opus-4.5-thinking",
-  "sonnet-4.5",
-  "gpt-5.1-high",
-  "gemini-3-pro",
-  "gemini-3-flash",
-  "grok",
-]);
-
 export interface CliInput {
   prompt: string;
   model: string;
@@ -56,23 +20,15 @@ export interface CliInput {
  *   "opus-4.6-thinking"   -> "opus-4.6-thinking"
  */
 export function extractModel(model: string): string {
-  if (model.startsWith("cursor/")) {
-    return model.slice("cursor/".length) || "auto";
+  if (model.startsWith("cursor/") || model.startsWith("openai/")) {
+    return model.slice(model.indexOf("/") + 1);
   }
 
   if (model.startsWith("cursor-")) {
-    const remainder = model.slice("cursor-".length);
-    if (remainder && KNOWN_CURSOR_MODELS.has(remainder)) {
-      return remainder;
-    }
-    if (remainder) return remainder;
+    return model.slice("cursor-".length);
   }
 
-  if (KNOWN_CURSOR_MODELS.has(model)) {
-    return model;
-  }
-
-  return "auto";
+  return model;
 }
 
 function messageContentToText(content: string | OpenAIContentPart[]): string {

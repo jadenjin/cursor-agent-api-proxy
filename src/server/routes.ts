@@ -13,35 +13,9 @@ import {
   createChatResponse,
 } from "../adapter/cli-to-openai.js";
 import type { OpenAIChatRequest } from "../types/openai.js";
+import { getAvailableModels } from "../subprocess/models.js";
 
-const KNOWN_MODELS = [
-  "auto",
-  "composer-1.5",
-  "composer-1",
-  "opus-4.6-thinking",
-  "opus-4.6",
-  "opus-4.5-thinking",
-  "opus-4.5",
-  "sonnet-4.5-thinking",
-  "sonnet-4.5",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-fast",
-  "gpt-5.3-codex-low",
-  "gpt-5.3-codex-low-fast",
-  "gpt-5.3-codex-high",
-  "gpt-5.3-codex-high-fast",
-  "gpt-5.3-codex-xhigh",
-  "gpt-5.3-codex-xhigh-fast",
-  "gpt-5.3-codex-spark-preview",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.2-codex-low",
-  "gpt-5.2-codex-low-fast",
-  "gpt-5.1-codex-max",
-  "gemini-3-pro",
-  "gemini-3-flash",
-  "grok",
-];
+const MODEL_ID = /^[a-z0-9][a-z0-9._-]*$/;
 
 function extractApiKey(req: Request): string | undefined {
   const auth = req.headers.authorization;
@@ -60,11 +34,11 @@ export async function handleChatCompletions(
 ): Promise<void> {
   const requestId = uuidv4().replace(/-/g, "").slice(0, 24);
   const body = req.body as OpenAIChatRequest;
-  const stream = body.stream === true;
+  const stream = body?.stream === true;
 
   try {
     if (
-      !body.messages ||
+      !body?.messages ||
       !Array.isArray(body.messages) ||
       body.messages.length === 0
     ) {
@@ -78,8 +52,36 @@ export async function handleChatCompletions(
       return;
     }
 
+    if (body.model !== undefined && (typeof body.model !== "string" || !body.model)) {
+      res.status(400).json({ error: { message: "model must be a non-empty string", type: "invalid_request_error", code: "invalid_model" } });
+      return;
+    }
+
     const { prompt, model } = openaiToCli(body);
+    if (!MODEL_ID.test(model)) {
+      res.status(400).json({ error: { message: "Invalid model ID", type: "invalid_request_error", code: "invalid_model" } });
+      return;
+    }
+
     const apiKey = extractApiKey(req);
+    let availableModels: string[];
+    try {
+      availableModels = await getAvailableModels(apiKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(503).json({ error: { message, type: "server_error", code: "model_catalog_unavailable" } });
+      return;
+    }
+    if (!availableModels.includes(model)) {
+      res.status(400).json({
+        error: {
+          message: `Model '${model}' is not available. Check GET /v1/models for valid IDs.`,
+          type: "invalid_request_error",
+          code: "model_not_found",
+        },
+      });
+      return;
+    }
     console.error(
       `[chat] id=${requestId} model=${body.model} -> cli_model=${model} stream=${stream}`
     );
@@ -225,6 +227,10 @@ async function handleNonStreamingResponse(
     });
 
     subprocess.on("close", () => {
+      if (res.headersSent) {
+        resolve();
+        return;
+      }
       if (finalResult) {
         const response = createChatResponse(
           requestId,
@@ -232,7 +238,7 @@ async function handleNonStreamingResponse(
           finalResult.text
         );
         res.json(response);
-      } else if (!res.headersSent) {
+      } else {
         res.status(500).json({
           error: {
             message: "CLI exited without producing a result",
@@ -259,18 +265,23 @@ async function handleNonStreamingResponse(
   });
 }
 
-export function handleModels(_req: Request, res: Response): void {
+export async function handleModels(req: Request, res: Response): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-
-  res.json({
-    object: "list",
-    data: KNOWN_MODELS.map((id) => ({
-      id,
-      object: "model" as const,
-      owned_by: "cursor",
-      created: now,
-    })),
-  });
+  try {
+    const models = await getAvailableModels(extractApiKey(req));
+    res.json({
+      object: "list",
+      data: models.map((id) => ({
+        id,
+        object: "model" as const,
+        owned_by: "cursor",
+        created: now,
+      })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(503).json({ error: { message, type: "server_error", code: "model_catalog_unavailable" } });
+  }
 }
 
 let cachedCliVersion: string | undefined;

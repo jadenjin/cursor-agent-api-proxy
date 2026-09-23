@@ -107,7 +107,9 @@ sonnet-4.5-thinking   # Claude Sonnet 4.5 (thinking)
 gemini-3-pro          # Gemini 3 Pro
 ```
 
-Full list: `curl http://localhost:4646/v1/models` or `agent --list-models`.
+Full list: `curl http://localhost:4646/v1/models` or `agent --list-models`. The API now reads the CLI list (cached for 30 seconds) rather than returning a built-in list. A requested model must appear in that list; unknown IDs return HTTP 400 instead of silently using Auto. OpenAI client prefixes such as `openai/grok-4.7-medium-fast` are stripped before calling the CLI.
+
+If the CLI reports that `CURSOR_API_KEY` is invalid, remove that environment variable when using `agent login`, or set a valid Cursor API key. `OPENAI_API_KEY=not-needed` is a client placeholder, not a Cursor API key.
 
 ## API
 

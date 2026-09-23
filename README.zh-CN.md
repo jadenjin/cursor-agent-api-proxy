@@ -109,6 +109,10 @@ gemini-3-pro          # Gemini 3 Pro
 
 完整列表：`curl http://localhost:4646/v1/models` 或 `agent --list-models`。
 
+模型列表由 `agent --list-models` 实时获取（缓存 30 秒）。请求的模型 ID 必须出现在列表中；未知模型会返回 HTTP 400，不再悄悄回退到 Auto。`openai/` 和 `cursor/` 前缀会在调用 CLI 前去掉。
+
+如果 CLI 报 `CURSOR_API_KEY` 无效，使用 `agent login` 时请移除该环境变量，或者设置有效的 Cursor API Key。客户端配置中的 `OPENAI_API_KEY=not-needed` 只是占位值，不是 Cursor API Key。
+
 ## API
 
 | 端点 | 方法 | 说明 |

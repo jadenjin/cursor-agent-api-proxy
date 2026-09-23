@@ -44,6 +44,8 @@ export class CursorSubprocess extends EventEmitter {
   private isKilled = false;
   private detectedModel = "cursor-auto";
   private turnBuffer = "";
+  private stderrBuffer = "";
+  private hasResult = false;
 
   async start(prompt: string, options: SubprocessOptions): Promise<void> {
     const args = this.buildArgs(options);
@@ -52,6 +54,9 @@ export class CursorSubprocess extends EventEmitter {
     return new Promise<void>((resolve, reject) => {
       try {
         const env = { ...process.env };
+        if (["not-needed", "no-key", "null"].includes(env.CURSOR_API_KEY ?? "")) {
+          delete env.CURSOR_API_KEY;
+        }
         if (options.apiKey) {
           env.CURSOR_API_KEY = options.apiKey;
         }
@@ -61,12 +66,13 @@ export class CursorSubprocess extends EventEmitter {
           env,
           stdio: ["pipe", "pipe", "pipe"],
           shell: IS_WIN,
+          windowsHide: true,
         });
 
         this.timeoutId = setTimeout(() => {
           if (!this.isKilled) {
             this.isKilled = true;
-            this.process?.kill(IS_WIN ? undefined : "SIGTERM");
+            this.killProcessTree();
             this.emit("error", new Error(`Request timed out after ${timeout}ms`));
           }
         }, timeout);
@@ -97,6 +103,7 @@ export class CursorSubprocess extends EventEmitter {
         this.process.stderr?.on("data", (chunk: Buffer) => {
           const text = chunk.toString().trim();
           if (text) {
+            this.stderrBuffer = (this.stderrBuffer + text).slice(-4096);
             console.error("[CursorSubprocess stderr]", text.slice(0, 500));
           }
         });
@@ -105,6 +112,9 @@ export class CursorSubprocess extends EventEmitter {
           this.clearTimer();
           if (this.buffer.trim()) {
             this.processBuffer();
+          }
+          if (!this.hasResult && !this.isKilled && /provided API key is invalid/i.test(this.stderrBuffer)) {
+            this.emit("error", new Error("Cursor CLI rejected CURSOR_API_KEY. Unset it to use agent login, or provide a valid Cursor API key."));
           }
           this.emit("close", code);
         });
@@ -188,6 +198,7 @@ export class CursorSubprocess extends EventEmitter {
     }
 
     if (isResultMessage(msg)) {
+      this.hasResult = true;
       const result: ResultEvent = {
         text: msg.result ?? "",
         model: this.detectedModel,
@@ -208,16 +219,25 @@ export class CursorSubprocess extends EventEmitter {
     if (!this.isKilled && this.process) {
       this.isKilled = true;
       this.clearTimer();
-      if (IS_WIN) {
-        this.process.kill();
-      } else {
-        this.process.kill("SIGTERM");
-      }
+      this.killProcessTree();
     }
   }
 
   isRunning(): boolean {
     return this.process !== null && !this.isKilled && this.process.exitCode === null;
+  }
+
+  private killProcessTree(): void {
+    if (!this.process?.pid || this.process.exitCode !== null) return;
+    if (IS_WIN) {
+      // With shell:true, Node owns cmd.exe; killing it alone leaves agent running.
+      spawn("taskkill", ["/PID", String(this.process.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else {
+      this.process.kill("SIGTERM");
+    }
   }
 }
 
