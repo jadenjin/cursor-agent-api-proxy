@@ -12,6 +12,7 @@ import { EventEmitter } from "events";
 import type { CursorCliMessage } from "../types/cursor-cli.js";
 import {
   isSystemInit,
+  isAssistantDelta,
   isAssistantMessage,
   isToolCallMessage,
   isResultMessage,
@@ -178,6 +179,15 @@ export class CursorSubprocess extends EventEmitter {
 
       if (!text) return;
 
+      // Current CLI partial messages contain token deltas. Repeated text can be
+      // intentional (for example the two tokens in "九九"), so append each one.
+      if (isAssistantDelta(msg)) {
+        this.emit("content_delta", { text } as ContentDeltaEvent);
+        this.turnBuffer += text;
+        return;
+      }
+
+      // A final assistant message repeats the full turn after the deltas.
       if (text === this.turnBuffer) return;
 
       if (text.startsWith(this.turnBuffer)) {
@@ -187,8 +197,9 @@ export class CursorSubprocess extends EventEmitter {
         return;
       }
 
-      this.emit("content_delta", { text } as ContentDeltaEvent);
-      this.turnBuffer += text;
+      // The final snapshot can differ slightly from partial output. Emitting it
+      // again would duplicate the answer already sent to streaming clients.
+      this.turnBuffer = text;
       return;
     }
 
